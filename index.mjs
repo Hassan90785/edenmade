@@ -5,7 +5,6 @@ import pool from "./db/dbConnection.mjs";
 
 const app = express();
 app.use(json());
-// Apply JWT authentication middleware globally
 app.use('/api', apiRouter);
 
 pool.getConnection()

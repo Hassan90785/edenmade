@@ -10,7 +10,7 @@ export const successResponse = (res, msg) => {
 };
 
 // Define success response with data
-export const successResponseWithData = (res, msg, data = '') => {
+export const successResponseWithData = (res, msg, data) => {
     const resData = {
         status: 1,
         message: msg,
