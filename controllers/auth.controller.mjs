@@ -1,4 +1,4 @@
-import {ErrorResponse, successResponse, successResponseWithData} from "../helpers/apiresponse.mjs";
+import {ErrorResponse, successResponseWithData} from "../helpers/apiresponse.mjs";
 import pool from "../db/dbConnection.mjs";
 import bcrypt from 'bcrypt'; // Import bcrypt for password hashing
 /**
@@ -60,12 +60,64 @@ export const signUp = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10); // Salt rounds: 10
 
         // Insert the new user into the database with the hashed password
-        await pool.query('INSERT INTO customer (email, password) VALUES (?, ?)', [email, hashedPassword]);
-
+        const [userResults] = await pool.query('INSERT INTO customer (email, password) VALUES (?, ?)', [email, hashedPassword]);
+        const customerId = userResults.insertId;
+        const [newlyAddedUser] = await pool.query('SELECT * FROM customer WHERE customer_id = ?', [customerId]);
+        console.log('newlyAddedUser:', newlyAddedUser[0])
         // Return a success response
-        return successResponse(res, 'User registered successfully');
+        return successResponseWithData(res, 'User registered successfully', newlyAddedUser[0]);
     } catch (error) {
         console.error('Error during sign-up:', error);
+        return ErrorResponse(res, 'Internal Server Error');
+    }
+};
+
+/**
+ *  Update customer details
+ * @param req
+ * @param res
+ * @returns {Promise<*>}
+ */
+export const updateCustomerDetails = async (req, res) => {
+    const {
+        customer_id,
+        first_name,
+        last_name,
+        address,
+        phone_number,
+        city,
+        postal_code,
+    } = req.body;
+
+    try {
+        // Assuming you have a table named 'user_details' where these details are stored
+        // You would need to adapt this SQL query based on your database schema
+        const updateQuery = `
+            UPDATE customer 
+            SET 
+                first_name = ?, 
+                last_name = ?, 
+                address = ?, 
+                phone_number = ?, 
+                city = ?, 
+                postal_code = ?
+            WHERE customer_id = ?`;
+
+        // Execute the query with the provided parameters
+        await pool.query(updateQuery, [
+            first_name,
+            last_name,
+            address,
+            phone_number,
+            city,
+            postal_code,
+            customer_id // Assuming you have the user's ID available in the request
+        ]);
+        const [updatedCustomer] = await pool.query('SELECT * FROM customer WHERE customer_id = ?', [customer_id]);
+        // Return a success response
+        return successResponseWithData(res, 'Customer details updated successfully', updatedCustomer[0]);
+    } catch (error) {
+        console.error('Error updating user details:', error);
         return ErrorResponse(res, 'Internal Server Error');
     }
 };

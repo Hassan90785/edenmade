@@ -2,9 +2,11 @@
 import apiRouter from "./routes/api.router.mjs";
 import express, {json} from "express";
 import pool from "./db/dbConnection.mjs";
+import cors from "cors";
 
 const app = express();
 app.use(json());
+app.use(cors());
 app.use('/api', apiRouter);
 
 pool.getConnection()
