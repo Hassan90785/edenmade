@@ -1,6 +1,13 @@
 import stripePackage from 'stripe';
-import * as buffer from "buffer";
-import {json} from "express";
+import {getCustomerByEmail} from "./custoemr.controller.mjs";
+import {
+    addRecipeMapping_v2,
+    generateRandomRecipePayload,
+    getOrderDetails,
+    placeOrder_v2
+} from "./orders.controller.mjs";
+import {sendMessageToAll} from "./websocket.controller.mjs";
+import {subscribe} from "../helpers/pubsub.mjs";
 
 const stripe = stripePackage('sk_test_51Os7kqANqKE86m4zlzLkmfDMIl975fWda86rBMvOU88hMEZaBhEKqyQiNE8ypGbZWQ7Ol9kZpBXQg6SrcSu8R0qa000UkVVT0S');
 // Endpoint to handle webhook events
@@ -11,17 +18,10 @@ export const stripe_webhook = async (req, res) => {
     const sig = req.headers['stripe-signature'];
 
     try {
-        // Log event payload and signature for debugging
-        console.log('-----------------------------')
-        console.log('eventPayload: ', eventPayload);
-        console.log('Signature: ', sig);
-        console.log('*******************************')
 
-        // Verify the webhook signature
         let event;
         try {
             event = stripe.webhooks.constructEvent(eventPayload, sig, webhookSecret);
-            console.log('Event: ', event); // Log the event object for inspection
         } catch (err) {
             console.error('Error verifying webhook signature:', err);
             return res.status(400).send(`Webhook Error: ${err.message}`);
@@ -30,13 +30,14 @@ export const stripe_webhook = async (req, res) => {
         // Handle payment success event
         if (event.type === 'checkout.session.completed') {
             const session = event.data.object; // Use 'event' instead of 'verifiedEvent'
-            const subscriptionId = session.subscription;
-            const paymentId = session.payment_intent;
-            const customerId = session.customer;
+            const subscription_id = session.subscription;
+            const initial_payment_id = session.payment_intent;
+            const stripe_customer_id = session.customer;
+            const customer_email = session.customer_email;
+            const amount_paid = session.amount_total;
             // Save subscriptionId, paymentId, customerId to your database
-            console.log('Subscription ID:', subscriptionId);
-            console.log('Payment ID:', paymentId);
-            console.log('Customer ID:', customerId);
+            console.log('creating order:')
+            await create_order({stripe_customer_id, customer_email, subscription_id, initial_payment_id, amount_paid});
         }
 
         res.status(200).end();
@@ -45,13 +46,44 @@ export const stripe_webhook = async (req, res) => {
         res.status(400).send('Webhook Error: ' + err.message);
     }
 }
-
+export const create_order = async (req) => {
+    console.log('------------create_order---------------');
+    const {
+        stripe_customer_id,
+        customer_email,
+        subscription_id,
+        initial_payment_id,
+        amount_paid
+    } = req;
+    let customer_id = null;
+    const resp = await getCustomerByEmail({email: customer_email}, {})
+    if (resp) {
+        customer_id = resp.customer_id
+        const order_id = await placeOrder_v2(
+            {
+                customer_id,
+                number_of_people: null,
+                delivery_date: null,
+                active_week: 1,
+                initial_payment_id,
+                amount_paid,
+                stripe_customer_id
+            });
+        const mappings = await generateRandomRecipePayload(3, 1);
+        if (mappings) {
+            await addRecipeMapping_v2({order_id, mappings})
+        }
+        const orderDetails = await getOrderDetails(order_id)
+        subscribe('ws_message', function(message) {
+            console.log('ws_message: Received message:', message);
+            console.log('order_id:', order_id);
+            sendMessageToAll( orderDetails );
+        });
+    }
+}
 
 export const create_subscription = async (req, res) => {
     try {
-        console.log('create_subscription')
-        console.log('create_subscription: productName: ',req.body.productName )
-        console.log('create_subscription: price: ',req.body.price )
         const product = await stripe.products.create({
             name: req.body.productName,
             type: 'service',
@@ -60,7 +92,7 @@ export const create_subscription = async (req, res) => {
         // Create price
         const price = await stripe.prices.create({
             product: product.id,
-            unit_amount: req.body.price * 100, // price in cents
+            unit_amount: Math.round(req.body.price * 100), // price in cents
             currency: 'usd',
             recurring: {
                 interval: 'week', // Billing interval (e.g., month, week, year)

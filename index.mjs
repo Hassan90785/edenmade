@@ -4,6 +4,8 @@ import express, {json} from "express";
 import pool from "./db/dbConnection.mjs";
 import cors from "cors";
 import * as StripeController from "./controllers/stripe.controller.mjs";
+import {sendMessageToAll, wss} from "./controllers/websocket.controller.mjs";
+import {publish} from "./helpers/pubsub.mjs";
 
 const app = express();
 app.use((req, res, next) => {
@@ -28,7 +30,21 @@ pool.getConnection()
         process.exit(1); // Exit the process if unable to connect to the database
     });
 
+// Event listener for WebSocket connections
+wss.on('connection', function connection(ws) {
+    console.log('Client connected');
 
+    // Event listener for incoming messages from clients
+    ws.on('message', function incoming(message) {
+        console.log('Received message from client:', message);
+        publish('ws_message', message);
+    });
+
+    // Event listener for WebSocket disconnections
+    ws.on('close', function close() {
+        console.log('Client disconnected');
+    });
+});
 // Close the connection pool when the process receives a termination signal (e.g., SIGINT)
 process.on('SIGINT', () => {
     console.log('Received SIGINT. Closing database connection pool...');
