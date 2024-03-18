@@ -3,12 +3,21 @@ import apiRouter from "./routes/api.router.mjs";
 import express, {json} from "express";
 import pool from "./db/dbConnection.mjs";
 import cors from "cors";
+import * as StripeController from "./controllers/stripe.controller.mjs";
 
 const app = express();
-app.use(json());
+app.use((req, res, next) => {
+    if (req.originalUrl === '/api/stripe/webhook') {
+        next();
+    } else {
+        json()(req, res, next);
+    }
+});
+
 app.use(cors());
 app.use('/api', apiRouter);
 
+app.post("/api/stripe/webhook", express.raw({type: 'application/json'}), StripeController.stripe_webhook);
 pool.getConnection()
     .then(connection => {
         console.log('DB is connected');
@@ -34,7 +43,7 @@ process.on('SIGINT', () => {
 });
 
 // Start the Express server
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });

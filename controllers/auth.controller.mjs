@@ -63,7 +63,6 @@ export const signUp = async (req, res) => {
         const [userResults] = await pool.query('INSERT INTO customer (email, password) VALUES (?, ?)', [email, hashedPassword]);
         const customerId = userResults.insertId;
         const [newlyAddedUser] = await pool.query('SELECT * FROM customer WHERE customer_id = ?', [customerId]);
-        console.log('newlyAddedUser:', newlyAddedUser[0])
         // Return a success response
         return successResponseWithData(res, 'User registered successfully', newlyAddedUser[0]);
     } catch (error) {
