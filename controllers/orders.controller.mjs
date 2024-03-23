@@ -248,10 +248,14 @@ export const getOrderDetailsEndpoint = async (req, res) => {
  * @param res
  * @returns {Promise<*>}
  */
+
+
 export const getOrderDetailsByCustomerId = async (req, res) => {
     try {
+        console.log('getOrderDetailsByCustomerId')
         // Extract customer ID from request parameters
         const { customer_id } = req.params;
+        console.log('customer_id: ', customer_id)
 
         // Validate customer ID
         if (!customer_id) {
@@ -337,9 +341,11 @@ export const getOrderDetailsByCustomerId = async (req, res) => {
         }
 
         // Return success response with order details
+        // return successResponseWithData(res, 'Order details retrieved successfully', orderIdRows);
         return successResponseWithData(res, 'Order details retrieved successfully', orderDetails);
     } catch (error) {
         console.error('Error retrieving order details:', error);
         return ErrorResponse(res, 'Internal Server Error');
     }
 };
+

@@ -13,7 +13,7 @@ export const getAllRecipes = async (req, res) => {
         const query = `
             SELECT recipes.*, categories.category_name
             FROM recipes
-            INNER JOIN categories ON recipes.categoryId = categories.id
+            INNER JOIN categories ON recipes.category_id = categories.category_id
         `;
         const [rows] = await pool.query(query);
 
@@ -39,8 +39,8 @@ export const getRecipesByCategory = async (req, res) => {
         const query = `
             SELECT recipes.*, categories.category_name
             FROM recipes
-            INNER JOIN categories ON recipes.categoryId = categories.id
-            WHERE recipes.categoryId = ?
+            INNER JOIN categories ON recipes.category_id = categories.category_id
+            WHERE recipes.category_id = ?
         `;
         const [rows] = await pool.query(query, [categoryId]);
 

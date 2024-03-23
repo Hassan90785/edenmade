@@ -36,6 +36,7 @@ export const stripe_webhook = async (req, res) => {
             const customer_email = session.customer_email;
             const amount_paid = session.amount_total;
             // Save subscriptionId, paymentId, customerId to your database
+            console.log('Session: ', session)
             console.log('creating order:')
             await create_order({stripe_customer_id, customer_email, subscription_id, initial_payment_id, amount_paid});
         }
@@ -74,10 +75,11 @@ export const create_order = async (req) => {
             await addRecipeMapping_v2({order_id, mappings})
         }
         const orderDetails = await getOrderDetails(order_id)
-        subscribe('ws_message', function(message) {
+        subscribe('ws_message', function (message) {
             console.log('ws_message: Received message:', message);
             console.log('order_id:', order_id);
-            sendMessageToAll( orderDetails );
+            console.log('Sending WebSocket Order Details to client')
+            sendMessageToAll(orderDetails);
         });
     }
 }

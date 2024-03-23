@@ -18,7 +18,6 @@ export const getCustomerByEmail = async (req, res) => {
             console.log('Email not registered! : ', email);
             return null;
         }
-        console.log('Retrieved Customer By Email: ', rows[0])
 
         // Passwords match, authentication successful
         return rows[0];
