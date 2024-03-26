@@ -14,30 +14,121 @@ export const placeOrder = async (req, res) => {
         // Extract order details from the request body
         const {
             customer_id,
-            number_of_people,
-            delivery_date,
             active_week,
-            subscription_id,
-            initial_payment_id,
-            amount_paid
+            order_type,
+            amount_paid,
+            meals_per_week,
+            number_of_people
         } = req.body;
 
         // Create the order
         const orderQuery = `
-            INSERT INTO orderdetails (customer_id, number_of_people, delivery_date, active_week, subscription_id, initial_payment_id, amount_paid)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO orderdetails (customer_id, order_type, active_week,  amount_paid)
+            VALUES (?, ?, ?, ?)
         `;
-        const [orderResult] = await pool.query(orderQuery, [customer_id, number_of_people, delivery_date, active_week, subscription_id, initial_payment_id, amount_paid]);
+        const [orderResult] = await pool.query(orderQuery, [customer_id, order_type, active_week, amount_paid]);
 
-        const orderId = orderResult.insertId;
-
-        return successResponseWithData(res, 'Order placed successfully', {orderId});
+        const order_id = orderResult.insertId;
+        const mapping = await generateMapping({
+            order_id,
+            customer_id,
+            meals_per_week,
+            number_of_people,
+            delivery_date: new Date()
+        });
+        if(mapping){
+            return successResponseWithData(res, 'Order placed successfully', {order_id});
+        }else{
+            return ErrorResponse(res, 'Internal Server Error');
+        }
     } catch (error) {
         console.error('Error placing order:', error);
         return ErrorResponse(res, 'Internal Server Error');
     }
 };
 
+/**
+ *  Generate Mapping
+ * @param order_id
+ * @param customer_id
+ * @param meals_per_week
+ * @param delivery_date
+ * @param number_of_people
+ * @returns {Promise<boolean>}
+ */
+export const generateMapping = async ({order_id, customer_id, meals_per_week, delivery_date, number_of_people}) => {
+    try {
+        // Fetch 3 random recipes from the recipes table
+        const recipesQuery = `
+            SELECT recipe_id,  price
+            FROM recipes
+            ORDER BY RAND()
+            LIMIT 3
+        `;
+        const [recipesResult] = await pool.query(recipesQuery);
+
+        // Create mapping entries for 4 weeks
+        for (let week = 1; week <= 4; week++) {
+            // Calculate delivery date for each week
+            const currentDeliveryDate = new Date(delivery_date);
+            if (week > 1) {
+                currentDeliveryDate.setDate(currentDeliveryDate.getDate() + ((week - 1) * 7)); // Increment delivery date by 7 days for each subsequent week
+            }
+
+            // Insert mapping entries based on meals_per_week
+            for (let meal = 1; meal <= meals_per_week; meal++) {
+                const recipeIndex = (week - 1) * meals_per_week + (meal - 1); // Calculate the index of the recipe in the recipesResult array
+                const {recipe_id, price} = recipesResult[recipeIndex % 3]; // Cycle through the 3 randomly selected recipes
+
+                // Insert mapping entry
+                const mappingQuery = `
+                    INSERT INTO orderrecipemapping ( order_id, week, recipe_id, spice_level_id,
+                     recipe_price, delivery_date, meals_per_week, number_of_people)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                `;
+                await pool.query(mappingQuery, [ order_id, week, recipe_id, 2, price,
+                    currentDeliveryDate, meals_per_week, number_of_people]);
+            }
+        }
+
+        return true; // Assuming success
+    } catch (error) {
+        console.error('Error generating mapping:', error);
+        throw error;
+    }
+};
+
+/**
+ * Get latest Order Id by Customer Email
+ * @param email
+ * @param order_type
+ * @returns {Promise<void>}
+ */
+export const getOrderIdByCustomerEmail = async (email, order_type) => {
+    try {
+        const query = `
+            SELECT order_id
+            FROM orderdetails
+            WHERE customer_id = (
+                SELECT customer_id
+                FROM customer
+                WHERE email = ?
+                LIMIT 1
+            ) AND order_type = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+        `;
+        const [result] = await pool.query(query, [email, order_type]);
+        if (result.length > 0) {
+            return result[0].order_id;
+        } else {
+            return null; // No order found
+        }
+    } catch (error) {
+        console.error('Error fetching order ID:', error);
+        throw error;
+    }
+};
 
 export const placeOrder_v2 = async (orderDetails) => {
     try {
@@ -70,6 +161,77 @@ export const placeOrder_v2 = async (orderDetails) => {
         throw new Error('Failed to place order');
     }
 };
+/**
+ * updateOrderRecipeMapping
+ * @param order_id
+ * @param subscription_id
+ * @param payment_id
+ * @param payment_date
+ * @returns {Promise<void>}
+ */
+export const updateOrderRecipeMapping = async (order_id, subscription_id, payment_id, payment_date) => {
+    try {
+        console.log('Updating Order Recipe Mapping...');
+        console.log('Order ID:', order_id);
+        console.log('Subscription ID:', subscription_id);
+        console.log('Payment ID:', payment_id);
+        console.log('Payment Date:', payment_date);
+
+        // Check if subscription_id in orderdetails table is null, if so, update it with subscriptionId
+        const updateSubscriptionIdQuery = `
+            UPDATE orderdetails
+            SET subscription_id = ?
+            WHERE order_id = ? AND subscription_id IS NULL
+        `;
+        const subscriptionResult = await pool.query(updateSubscriptionIdQuery, [subscription_id, order_id]);
+        const subscriptionRowsChanged = subscriptionResult ? subscriptionResult.affectedRows : 0;
+
+        // Find the first set of rows in orderrecipemapping with null payment_id and payment_date
+        const findNullPaymentQuery = `
+            SELECT *
+            FROM orderrecipemapping
+            WHERE order_id = ? AND payment_id IS NULL AND payment_date IS NULL
+            ORDER BY week ASC
+        `;
+        const nullPaymentRows = await pool.query(findNullPaymentQuery, [order_id]);
+
+        if (nullPaymentRows[0].length > 0) {
+            console.log('--------------------------')
+            const nullPaymentResult = nullPaymentRows[0];
+            const firstSetWeek = nullPaymentResult[0].week;
+            console.log('week: ',firstSetWeek)
+            const firstSetRows = nullPaymentResult.filter(row => row.week === firstSetWeek);
+            for (const nullPaymentRow of firstSetRows) {
+                // Update payment_id and payment_date for each row
+                const updatePaymentInfoQuery = `
+                    UPDATE orderrecipemapping
+                    SET payment_id = ?, payment_date = ?
+                    WHERE mapping_id = ?
+                `;
+                const paymentResult = await pool.query(updatePaymentInfoQuery,
+                    [payment_id, payment_date, nullPaymentRow.mapping_id]);
+                const paymentRowsChanged = paymentResult ? paymentResult.affectedRows : 0;
+            }
+
+            // Update active_week in orderdetails table with the index of the first row in the set
+            const updateActiveWeekQuery = `
+                UPDATE orderdetails
+                SET active_week = ?
+                WHERE order_id = ?
+            `;
+            console.log('updating active week = ', firstSetWeek, ' of orderid: ', order_id)
+            const activeWeekResult = await pool.query(updateActiveWeekQuery, [firstSetWeek, order_id]);
+
+            console.log('Order Recipe Mapping updated successfully.');
+        } else {
+            console.log('No rows found with null payment_id and payment_date.');
+        }
+    } catch (error) {
+        console.error('Error updating Order Recipe Mapping:', error);
+        throw error;
+    }
+};
+
 
 export const addRecipeMapping = async (req, res) => {
     try {
@@ -254,7 +416,7 @@ export const getOrderDetailsByCustomerId = async (req, res) => {
     try {
         console.log('getOrderDetailsByCustomerId')
         // Extract customer ID from request parameters
-        const { customer_id } = req.params;
+        const {customer_id} = req.params;
         console.log('customer_id: ', customer_id)
 
         // Validate customer ID

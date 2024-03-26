@@ -4,7 +4,9 @@ import {
     addRecipeMapping_v2,
     generateRandomRecipePayload,
     getOrderDetails,
-    placeOrder_v2
+    getOrderIdByCustomerEmail,
+    placeOrder_v2,
+    updateOrderRecipeMapping
 } from "./orders.controller.mjs";
 import {sendMessageToAll} from "./websocket.controller.mjs";
 import {subscribe} from "../helpers/pubsub.mjs";
@@ -18,7 +20,6 @@ export const stripe_webhook = async (req, res) => {
     const sig = req.headers['stripe-signature'];
 
     try {
-
         let event;
         try {
             event = stripe.webhooks.constructEvent(eventPayload, sig, webhookSecret);
@@ -29,16 +30,38 @@ export const stripe_webhook = async (req, res) => {
 
         // Handle payment success event
         if (event.type === 'checkout.session.completed') {
-            const session = event.data.object; // Use 'event' instead of 'verifiedEvent'
+            const session = event.data.object;
             const subscription_id = session.subscription;
             const initial_payment_id = session.payment_intent;
             const stripe_customer_id = session.customer;
             const customer_email = session.customer_email;
             const amount_paid = session.amount_total;
-            // Save subscriptionId, paymentId, customerId to your database
-            console.log('Session: ', session)
-            console.log('creating order:')
-            await create_order({stripe_customer_id, customer_email, subscription_id, initial_payment_id, amount_paid});
+
+            if (subscription_id) {
+                console.log('Payment Success ')
+                const {paymentId, paymentDate} = await getSubscriptionPayments(subscription_id)
+                console.log('paymentId: ', paymentId)
+                console.log('paymentDate: ', paymentDate)
+                // Determine payment number based on your records
+                const paymentNumber = await determinePaymentNumber(subscription_id, customer_email, paymentId, paymentDate); // Implement this function to fetch payment number from your database
+                console.log('OrderID: ', paymentNumber)
+                // Handle payment logic based on payment number
+                switch (paymentNumber) {
+                    case 1:
+                        // Handle first payment logic
+                        break;
+                    case 2:
+                        // Handle second payment logic
+                        break;
+                    // Add more cases as needed
+                    default:
+                        // Handle logic for subsequent payments
+                        break;
+                }
+            } else {
+                // Single payment (non-subscription)
+                // Handle accordingly
+            }
         }
 
         res.status(200).end();
@@ -47,6 +70,40 @@ export const stripe_webhook = async (req, res) => {
         res.status(400).send('Webhook Error: ' + err.message);
     }
 }
+
+export const getSubscriptionPayments = async (subscriptionId) => {
+    try {
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+            expand: ['latest_invoice.payment_intent'] // Expand to include payment details
+        });
+        let paymentId = null;
+
+        let paymentDate = null
+        if (subscription) {
+            paymentId = subscription.latest_invoice.payment_intent.id; // Payment ID
+            paymentDate = new Date(subscription.latest_invoice.payment_intent.created * 1000);
+        }
+        return {paymentId, paymentDate};
+    } catch (error) {
+        console.error('Error fetching subscription details:', error);
+        throw error;
+    }
+};
+
+// Function to determine payment number based on subscription ID
+async function determinePaymentNumber(subscriptionId, customer_email, payment_id, payment_date) {
+    console.log('determinePaymentNumber')
+    const order_id = await getOrderIdByCustomerEmail(customer_email, 'S');
+    console.log('order_id:: ', order_id)
+    await updateOrderRecipeMapping(order_id, subscriptionId, payment_id, payment_date)
+    if (order_id) {
+        return order_id
+    } else {
+        console.log('No Order found against customer - ' + customer_email)
+        return null;
+    }
+}
+
 export const create_order = async (req) => {
     console.log('------------create_order---------------');
     const {
