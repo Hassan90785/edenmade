@@ -59,7 +59,7 @@ process.on('SIGINT', () => {
 });
 
 // Start the Express server
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8083;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });

@@ -318,25 +318,27 @@ export const getOrderDetails = async (orderId) => {
             SELECT
                 od.order_id,
                 od.customer_id,
-                od.number_of_people,
-                od.delivery_date,
                 od.active_week,
-                od.subscription_id,
-                od.initial_payment_id,
                 od.amount_paid,
+                od.subscription_id AS stripe_customer_id,
+                od.initial_payment_id,
                 od.created_at,
-                c.first_name,
-                c.last_name,
-                c.email,
-                m.mapping_id,
+                c.email AS customer_email,
+                c.first_name AS customer_name,
                 m.week,
-                m.recipe_id,
-                r.title,
-                r.price,
-                m.spice_level_id,
-                s.spice_level_name,
                 m.payment_id,
-                m.payment_date
+                m.payment_date,
+                r.recipe_id,
+                r.title AS recipe_name,
+                r.price AS recipe_price,
+                s.spice_level_id,
+                s.spice_level_name,
+                m.delivery_date,
+                m.payment_id,
+                m.payment_date,
+                m.number_of_people,
+                m.meals_per_week,
+                m.mapping_id
             FROM orderdetails od
             JOIN customer c ON od.customer_id = c.customer_id
             LEFT JOIN orderrecipemapping m ON od.order_id = m.order_id
@@ -344,8 +346,9 @@ export const getOrderDetails = async (orderId) => {
             LEFT JOIN spicelevels s ON m.spice_level_id = s.spice_level_id
             WHERE od.order_id = ?
         `;
+        console.log('orderId:: ', orderId)
         const [rows] = await pool.query(orderQuery, [orderId]);
-
+        console.log('rows:: ', rows)
         if (rows.length === 0) {
             return null; // Return null if order not found
         }
@@ -354,31 +357,45 @@ export const getOrderDetails = async (orderId) => {
         const orderDetails = {
             order_id: rows[0].order_id,
             customer_id: rows[0].customer_id,
-            number_of_people: rows[0].number_of_people,
-            delivery_date: rows[0].delivery_date,
             active_week: rows[0].active_week,
-            subscription_id: rows[0].subscription_id,
-            initial_payment_id: rows[0].initial_payment_id,
             amount_paid: rows[0].amount_paid,
-            customer_name: rows[0].first_name + ' ' + rows[0].last_name,
-            customer_email: rows[0].email,
-            order_details: []
-        };
-
-        // Populate order details if mappings exist
-        if (rows[0].mapping_id !== null) {
-            orderDetails.order_details = rows.map(row => ({
-                recipe_id: row.recipe_id,
-                recipe_name: row.title,
-                recipe_price: row.price,
+            subscription_id: rows[0].stripe_customer_id,
+            initial_payment_id: rows[0].initial_payment_id,
+            created_at: rows[0].created_at,
+            customer_email: rows[0].customer_email,
+            customer_name: rows[0].customer_name,
+            order_details: rows.map(row => ({
                 week: row.week,
-                spice_level_id: row.spice_level_id,
-                spice_level_name: row.spice_level_name,
                 payment_id: row.payment_id,
                 payment_date: row.payment_date,
-                created_at: row.created_at
-            }));
-        }
+                delivery_date: row.delivery_date,
+                number_of_people: row.number_of_people,
+                meals_per_week: row.meals_per_week,
+                items: [
+                    {
+                        recipe_id: row.recipe_id,
+                        recipe_name: row.recipe_name,
+                        recipe_price: row.recipe_price,
+                        spice_level_id: row.spice_level_id,
+                        spice_level_name: row.spice_level_name
+                    }
+                ]
+            }))
+        };
+
+        // Merge items with same week into single object
+        const mergedOrderDetails = [];
+        orderDetails.order_details.forEach(detail => {
+            const foundIndex = mergedOrderDetails.findIndex(item => item.week === detail.week);
+            if (foundIndex !== -1) {
+                mergedOrderDetails[foundIndex].items.push(detail.items[0]);
+            } else {
+                mergedOrderDetails.push(detail);
+            }
+        });
+
+        // Update order details with merged items
+        orderDetails.order_details = mergedOrderDetails;
 
         return orderDetails; // Return order details object
     } catch (error) {
@@ -387,12 +404,13 @@ export const getOrderDetails = async (orderId) => {
     }
 };
 
+
 // Endpoint handler to get order details by order ID
 export const getOrderDetailsEndpoint = async (req, res) => {
     try {
-        const orderId = req.params.orderId;
-        const orderDetails = await getOrderDetails(orderId);
-
+        console.log('getOrderDetailsEndpoint: ',  req.body.orderId)
+        const orderDetails = await getOrderDetails(req.body.orderId);
+        console.log('orderDetails: ', orderDetails)
         if (!orderDetails) {
             return ErrorResponse(res, 'Order not found', 404);
         }

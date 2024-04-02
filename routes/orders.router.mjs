@@ -12,7 +12,7 @@ const ordersRouter = express.Router();
 // Define routes for order controller
 ordersRouter.post('/place-order', placeOrder);
 ordersRouter.post('/add-selected-recipes', addRecipeMapping);
-ordersRouter.get('/:orderId', getOrderDetailsEndpoint);
+ordersRouter.post('/fetch-order', getOrderDetailsEndpoint);
 ordersRouter.get('/getOrderDetails/:customer_id:', getOrderDetailsByCustomerId);
 
 // Export the router
