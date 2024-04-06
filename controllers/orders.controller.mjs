@@ -36,9 +36,9 @@ export const placeOrder = async (req, res) => {
             number_of_people,
             delivery_date: new Date()
         });
-        if(mapping){
+        if (mapping) {
             return successResponseWithData(res, 'Order placed successfully', {order_id});
-        }else{
+        } else {
             return ErrorResponse(res, 'Internal Server Error');
         }
     } catch (error) {
@@ -86,7 +86,7 @@ export const generateMapping = async ({order_id, customer_id, meals_per_week, de
                      recipe_price, delivery_date, meals_per_week, number_of_people)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 `;
-                await pool.query(mappingQuery, [ order_id, week, recipe_id, 2, price,
+                await pool.query(mappingQuery, [order_id, week, recipe_id, 2, price,
                     currentDeliveryDate, meals_per_week, number_of_people]);
             }
         }
@@ -130,37 +130,6 @@ export const getOrderIdByCustomerEmail = async (email, order_type) => {
     }
 };
 
-export const placeOrder_v2 = async (orderDetails) => {
-    try {
-        // Extract order details from the provided object
-        const {
-            customer_id,
-            number_of_people,
-            delivery_date,
-            active_week,
-            subscription_id,
-            stripe_customer_id,
-            initial_payment_id,
-            amount_paid,
-            order_type
-        } = orderDetails;
-
-        // Create the order
-        const orderQuery = `
-            INSERT INTO orderdetails (customer_id, number_of_people, delivery_date, stripe_customer_id, active_week, subscription_id, initial_payment_id, amount_paid, order_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `;
-        const [orderResult] = await pool.query(orderQuery, [customer_id, number_of_people, delivery_date, stripe_customer_id, active_week, subscription_id, initial_payment_id, amount_paid, order_type]);
-
-        const orderId = orderResult.insertId;
-
-        // Return the order ID
-        return orderId;
-    } catch (error) {
-        console.error('Error placing order:', error);
-        throw new Error('Failed to place order');
-    }
-};
 /**
  * updateOrderRecipeMapping
  * @param order_id
@@ -199,7 +168,7 @@ export const updateOrderRecipeMapping = async (order_id, subscription_id, paymen
             console.log('--------------------------')
             const nullPaymentResult = nullPaymentRows[0];
             const firstSetWeek = nullPaymentResult[0].week;
-            console.log('week: ',firstSetWeek)
+            console.log('week: ', firstSetWeek)
             const firstSetRows = nullPaymentResult.filter(row => row.week === firstSetWeek);
             for (const nullPaymentRow of firstSetRows) {
                 // Update payment_id and payment_date for each row
@@ -255,55 +224,6 @@ export const addRecipeMapping = async (req, res) => {
         return ErrorResponse(res, 'Internal Server Error');
     }
 };
-export const addRecipeMapping_v2 = async (req) => {
-    try {
-        const {order_id, mappings} = req;
-
-        // Save the recipe mappings for the order
-        const mappingsPromises = mappings.map(async (mapping) => {
-            const mappingQuery = `
-                INSERT INTO orderrecipemapping (order_id, week, recipe_id, recipe_price, spice_level_id)
-                VALUES (?, ?, ?, ?, ?)
-            `;
-            await pool.query(mappingQuery, [order_id, mapping.week, mapping.recipe_id, mapping.recipe_price,
-                mapping.spice_level_id]);
-        });
-
-        await Promise.all(mappingsPromises);
-        console.log('Recipe mappings added successfully')
-        return true;
-    } catch (error) {
-        console.error('Error adding recipe mappings:', error);
-        throw new Error('Failed to add recipe mappings');
-    }
-};
-export const generateRandomRecipePayload = async (count, week) => {
-    try {
-        // Fetch the required number of recipes randomly
-        const recipeQuery = `SELECT * FROM recipes ORDER BY RAND() LIMIT ?`;
-        const [recipes] = await pool.query(recipeQuery, [count]);
-
-        // Prepare the payload array
-        const payload = [];
-
-        // Loop through each randomly selected recipe to create the payload
-        for (const recipe of recipes) {
-            const recipePayload = {
-                recipe_id: recipe.recipe_id,
-                recipe_price: recipe.recipe_price,
-                spice_level_id: 2, // Set spice level to 1
-                week: week // Set spice level to 1
-            };
-            payload.push(recipePayload);
-        }
-
-        return payload;
-    } catch (error) {
-        console.error('Error generating random recipe payload:', error);
-        throw new Error('Failed to generate recipe payload');
-    }
-}
-
 /**
  * Get order details by order ID
  * @param req
@@ -348,7 +268,6 @@ export const getOrderDetails = async (orderId) => {
         `;
         console.log('orderId:: ', orderId)
         const [rows] = await pool.query(orderQuery, [orderId]);
-        console.log('rows:: ', rows)
         if (rows.length === 0) {
             return null; // Return null if order not found
         }
@@ -373,6 +292,7 @@ export const getOrderDetails = async (orderId) => {
                 meals_per_week: row.meals_per_week,
                 items: [
                     {
+                        mapping_id: row.mapping_id,
                         recipe_id: row.recipe_id,
                         recipe_name: row.recipe_name,
                         recipe_price: row.recipe_price,
@@ -408,7 +328,7 @@ export const getOrderDetails = async (orderId) => {
 // Endpoint handler to get order details by order ID
 export const getOrderDetailsEndpoint = async (req, res) => {
     try {
-        console.log('getOrderDetailsEndpoint: ',  req.body.orderId)
+        console.log('getOrderDetailsEndpoint: ', req.body.orderId)
         const orderDetails = await getOrderDetails(req.body.orderId);
         console.log('orderDetails: ', orderDetails)
         if (!orderDetails) {
@@ -421,6 +341,150 @@ export const getOrderDetailsEndpoint = async (req, res) => {
         return ErrorResponse(res, 'Internal Server Error');
     }
 };
+
+/**
+ *  Update Order
+ * @param req
+ * @param res
+ * @returns {Promise<*>}
+ */
+export const updateOrder = async (req, res) => {
+    try {
+        const {order_details, order_id} = req.body;
+        console.log('order_id:', order_id)
+        let latestPaidOrder = null;
+        let dueOrder = null;
+        order_details.forEach(order => {
+            if (order.payment_id) {
+                latestPaidOrder = order;
+            } else if (!dueOrder) {
+                dueOrder = order;
+            }
+        });
+
+        const response = {
+            latestPaidOrder,
+            dueOrder,
+            order_details
+        };
+
+        // Check if meals_per_week is different between latestPaidOrder and dueOrder
+        if (latestPaidOrder && dueOrder && latestPaidOrder.meals_per_week !== dueOrder.meals_per_week) {
+            // Make the function call here
+            await updateStripeSubscription(54);
+        }
+        // Updating Due Order week
+        console.log('----------Updaing Due Order----------')
+        await updateMappingDetails(dueOrder, order_id);
+        console.log('latestPaidOrder.week:', latestPaidOrder.week)
+        const remainingWeeks = order_details.filter(order =>
+            order.week > dueOrder.week
+        );
+        // Updating Rest of weeks too in case of anything changed
+        console.log('----------Remaining Week----------')
+        for (const order of remainingWeeks) {
+            await updateMappingDetails(order, order_id);
+        }
+        const updatedOrderDetails = await getOrderDetails(order_id);
+        return successResponseWithData(res, 'Order details retrieved successfully', updatedOrderDetails);
+    } catch (error) {
+        console.error('Error retrieving order details:', error);
+        return ErrorResponse(res, 'Internal Server Error');
+    }
+};
+// Function to update mapping details for a given order
+const updateMappingDetails = async (order, order_id) => {
+    if (!order) return; // If no order provided, return
+    console.log('----updateMappingDetails-----')
+    const {items, ...otherDetails} = order;
+    const date = new Date(otherDetails.delivery_date);
+    otherDetails.delivery_date = date.toISOString().slice(0, 19).replace('T', ' ');
+    // Fetch existing mappings for the given order_id
+    const existingMappingsQuery = `
+        SELECT *
+        FROM orderrecipemapping
+        WHERE order_id = ? AND week = ?
+    `;
+    const [existingMappingsRows] = await pool.query(existingMappingsQuery, [order_id, otherDetails.week]);
+    // Array to store the mapping IDs that are present in the current order
+    const currentMappingIds = items.map(item => item.mapping_id);
+
+
+    if (otherDetails.meals_per_week > existingMappingsRows[0].meals_per_week) {
+        console.log('Needs to add items in db --- meals_per_week: ', otherDetails.meals_per_week, ' , items: ', existingMappingsRows[0].meals_per_week, '+++++++++')
+        for (const item of items) {
+            const existingMapping = existingMappingsRows.find(row => row.mapping_id === item.mapping_id);
+            if (!existingMapping) {
+                // Mapping doesn't exist in the database, insert it
+                await insertMapping({...item, order_id, otherDetails});
+            }
+        }
+    }
+    if (otherDetails.meals_per_week < existingMappingsRows[0].meals_per_week) {
+        console.log('Needs to remove items   in db --- meals_per_week: ', otherDetails.meals_per_week, ' , items: ', existingMappingsRows[0].meals_per_week, '---------')
+        for (const existingMapping of existingMappingsRows) {
+            const {mapping_id} = existingMapping;
+            if (!currentMappingIds.includes(mapping_id)) {
+                // Mapping exists in the database but not in the current order payload, delete it
+                await deleteMapping(mapping_id);
+            }
+        }
+    }
+    for (const existingMapping of items) {
+        await updateMapping(existingMapping, otherDetails);
+    }
+};
+
+// Function to insert a new mapping
+const insertMapping = async (mapping) => {
+    console.log('Insert Mapping Case.')
+    const insertMappingQuery = `
+        INSERT INTO orderrecipemapping ( recipe_id, recipe_price, spice_level_id, order_id, week,
+        delivery_date, number_of_people, meals_per_week)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    await pool.query(insertMappingQuery, [mapping.recipe_id, mapping.recipe_price, mapping.spice_level_id, mapping.order_id,
+        mapping.otherDetails.week, mapping.otherDetails.delivery_date, mapping.otherDetails.number_of_people, mapping.otherDetails.meals_per_week]);
+
+    console.log(`New order recipe mapping inserted successfully for mapping ID: ${mapping.mapping_id}`);
+};
+
+// Function to update an existing mapping
+const updateMapping = async (mapping, otherDetails) => {
+    console.log('Update Mapping Case.')
+    if (!mapping || !mapping.mapping_id) {
+        console.log('Mapping ID required for update.')
+        return null;
+    }
+    const updateMappingQuery = `
+        UPDATE orderrecipemapping
+        SET spice_level_id = ?, recipe_id = ?, recipe_price = ?, delivery_date = ?, number_of_people = ?, meals_per_week = ?
+        WHERE mapping_id = ?
+    `;
+    const [result] = await pool.query(updateMappingQuery, [mapping.spice_level_id, mapping.recipe_id, mapping.recipe_price,
+        otherDetails.delivery_date, otherDetails.number_of_people, otherDetails.meals_per_week, mapping.mapping_id]);
+    console.log('result: ', result)
+    console.log(`Order recipe mapping updated successfully for mapping ID: ${mapping.mapping_id}`);
+};
+
+// Function to delete a mapping
+const deleteMapping = async (mapping_id) => {
+    console.log('Delete Mapping Case.')
+    const deleteMappingQuery = `
+        DELETE FROM orderrecipemapping
+        WHERE mapping_id = ?
+    `;
+    await pool.query(deleteMappingQuery, [mapping_id]);
+
+    console.log(`Mapping removed from orderrecipemapping for mapping ID: ${mapping_id}`);
+};
+
+// Define your function here
+const updateStripeSubscription = async (parameters) => {
+    console.log('updateStripeSubscription')
+    // Function logic here
+};
+
 
 /**
  * Get order details by customer ID
@@ -512,6 +576,7 @@ export const getOrderDetailsByCustomerId = async (req, res) => {
                 recipe_name: row.title,
                 recipe_price: row.price,
                 week: row.week,
+                mapping_id: row.mapping_id,
                 spice_level_id: row.spice_level_id,
                 spice_level_name: row.spice_level_name,
                 payment_id: row.payment_id,
