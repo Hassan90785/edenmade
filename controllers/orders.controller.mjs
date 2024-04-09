@@ -410,24 +410,20 @@ const updateMappingDetails = async (order, order_id) => {
     const currentMappingIds = items.map(item => item.mapping_id);
 
 
-    if (otherDetails.meals_per_week > existingMappingsRows[0].meals_per_week) {
-        console.log('Needs to add items in db --- meals_per_week: ', otherDetails.meals_per_week, ' , items: ', existingMappingsRows[0].meals_per_week, '+++++++++')
         for (const item of items) {
             const existingMapping = existingMappingsRows.find(row => row.mapping_id === item.mapping_id);
             if (!existingMapping) {
+                console.log('Needs to add items in db --- meals_per_week: ', otherDetails.meals_per_week, ' , items: ', existingMappingsRows[0].meals_per_week, '+++++++++')
                 // Mapping doesn't exist in the database, insert it
                 await insertMapping({...item, order_id, otherDetails});
             }
         }
-    }
-    if (otherDetails.meals_per_week < existingMappingsRows[0].meals_per_week) {
-        console.log('Needs to remove items   in db --- meals_per_week: ', otherDetails.meals_per_week, ' , items: ', existingMappingsRows[0].meals_per_week, '---------')
-        for (const existingMapping of existingMappingsRows) {
-            const {mapping_id} = existingMapping;
-            if (!currentMappingIds.includes(mapping_id)) {
-                // Mapping exists in the database but not in the current order payload, delete it
-                await deleteMapping(mapping_id);
-            }
+    for (const existingMapping of existingMappingsRows) {
+        const {mapping_id} = existingMapping;
+        if (!currentMappingIds.includes(mapping_id)) {
+            // Mapping exists in the database but not in the current order payload, delete it
+            console.log('Needs to remove items   in db --- meals_per_week: ', otherDetails.meals_per_week, ' , items: ', existingMappingsRows[0].meals_per_week, '---------')
+            await deleteMapping(mapping_id);
         }
     }
     for (const existingMapping of items) {
@@ -452,17 +448,18 @@ const insertMapping = async (mapping) => {
 // Function to update an existing mapping
 const updateMapping = async (mapping, otherDetails) => {
     console.log('Update Mapping Case.')
-    if (!mapping || !mapping.mapping_id) {
-        console.log('Mapping ID required for update.')
-        return null;
+    console.log('otherDetails:', otherDetails)
+    console.log('mapping:', mapping)
+    if (!mapping.mapping_id) {
+        console.log('Found Mapping Id null')
     }
     const updateMappingQuery = `
         UPDATE orderrecipemapping
-        SET spice_level_id = ?, recipe_id = ?, recipe_price = ?, delivery_date = ?, number_of_people = ?, meals_per_week = ?
+        SET spice_level_id = ?, recipe_id = ?, recipe_price = ?,  number_of_people = ?, meals_per_week = ?
         WHERE mapping_id = ?
     `;
     const [result] = await pool.query(updateMappingQuery, [mapping.spice_level_id, mapping.recipe_id, mapping.recipe_price,
-        otherDetails.delivery_date, otherDetails.number_of_people, otherDetails.meals_per_week, mapping.mapping_id]);
+        otherDetails.number_of_people, otherDetails.meals_per_week, mapping.mapping_id]);
     console.log('result: ', result)
     console.log(`Order recipe mapping updated successfully for mapping ID: ${mapping.mapping_id}`);
 };
