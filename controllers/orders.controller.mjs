@@ -349,6 +349,7 @@ export const getOrderDetailsEndpoint = async (req, res) => {
  * @returns {Promise<*>}
  */
 export const updateOrder = async (req, res) => {
+
     try {
         const {order_details, order_id} = req.body;
         console.log('order_id:', order_id)
@@ -368,21 +369,18 @@ export const updateOrder = async (req, res) => {
             order_details
         };
 
+        if (latestPaidOrder && latestPaidOrder.week === 1) {
+            await updateFirstWeekMapping(latestPaidOrder, order_id);
+        }
+
         // Check if meals_per_week is different between latestPaidOrder and dueOrder
         if (latestPaidOrder && dueOrder && latestPaidOrder.meals_per_week !== dueOrder.meals_per_week) {
             // Make the function call here
             await updateStripeSubscription(54);
         }
-        // Updating Due Order week
-        console.log('----------Updaing Due Order----------')
-        await updateMappingDetails(dueOrder, order_id);
-        console.log('latestPaidOrder.week:', latestPaidOrder.week)
-        const remainingWeeks = order_details.filter(order =>
-            order.week > dueOrder.week
-        );
-        // Updating Rest of weeks too in case of anything changed
-        console.log('----------Remaining Week----------')
-        for (const order of remainingWeeks) {
+        console.log('----------Order details Week----------')
+        for (const order of order_details) {
+            console.log('-----week: ', order.week, ' ---------')
             await updateMappingDetails(order, order_id);
         }
         const updatedOrderDetails = await getOrderDetails(order_id);
@@ -392,6 +390,7 @@ export const updateOrder = async (req, res) => {
         return ErrorResponse(res, 'Internal Server Error');
     }
 };
+
 // Function to update mapping details for a given order
 const updateMappingDetails = async (order, order_id) => {
     if (!order) return; // If no order provided, return
@@ -410,14 +409,14 @@ const updateMappingDetails = async (order, order_id) => {
     const currentMappingIds = items.map(item => item.mapping_id);
 
 
-        for (const item of items) {
-            const existingMapping = existingMappingsRows.find(row => row.mapping_id === item.mapping_id);
-            if (!existingMapping) {
-                console.log('Needs to add items in db --- meals_per_week: ', otherDetails.meals_per_week, ' , items: ', existingMappingsRows[0].meals_per_week, '+++++++++')
-                // Mapping doesn't exist in the database, insert it
-                await insertMapping({...item, order_id, otherDetails});
-            }
+    for (const item of items) {
+        const existingMapping = existingMappingsRows.find(row => row.mapping_id === item.mapping_id);
+        if (!existingMapping) {
+            console.log('Needs to add items in db --- meals_per_week: ', otherDetails.meals_per_week, ' , items: ', existingMappingsRows[0].meals_per_week, '+++++++++')
+            // Mapping doesn't exist in the database, insert it
+            await insertMapping({...item, order_id, otherDetails});
         }
+    }
     for (const existingMapping of existingMappingsRows) {
         const {mapping_id} = existingMapping;
         if (!currentMappingIds.includes(mapping_id)) {
@@ -460,7 +459,6 @@ const updateMapping = async (mapping, otherDetails) => {
     `;
     const [result] = await pool.query(updateMappingQuery, [mapping.spice_level_id, mapping.recipe_id, mapping.recipe_price,
         otherDetails.number_of_people, otherDetails.meals_per_week, mapping.mapping_id]);
-    console.log('result: ', result)
     console.log(`Order recipe mapping updated successfully for mapping ID: ${mapping.mapping_id}`);
 };
 
