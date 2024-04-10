@@ -32,22 +32,11 @@ export const stripe_webhook = async (req, res) => {
                 const {paymentId, paymentDate} = await getSubscriptionPayments(subscription_id)
                 console.log('paymentId: ', paymentId)
                 console.log('paymentDate: ', paymentDate)
+                console.log('session: ', session)
                 // Determine payment number based on your records
                 const paymentNumber = await determinePaymentNumber(subscription_id, customer_email, paymentId, paymentDate); // Implement this function to fetch payment number from your database
                 console.log('OrderID: ', paymentNumber)
-                // Handle payment logic based on payment number
-                switch (paymentNumber) {
-                    case 1:
-                        // Handle first payment logic
-                        break;
-                    case 2:
-                        // Handle second payment logic
-                        break;
-                    // Add more cases as needed
-                    default:
-                        // Handle logic for subsequent payments
-                        break;
-                }
+
             } else {
                 // Single payment (non-subscription)
                 // Handle accordingly
@@ -120,4 +109,58 @@ export const create_subscription = async (req, res) => {
         res.status(500).send('Error creating subscription');
     }
 }
+const createNewPriceForSubscription = async (subscriptionId, newPrice) => {
+    try {
+        // Retrieve the existing subscription to get the current price ID
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const currentPriceId = subscription.items.data[0].price.id;
+
+        // Create a new price with the desired amount
+        const createdPrice = await stripe.prices.create({
+            unit_amount: newPrice * 100, // Stripe expects the amount in cents
+            currency: 'usd', // Adjust currency as needed
+            product: subscription.items.data[0].price.product, // Use the same product as the current price
+            recurring: {
+                interval: subscription.items.data[0].price.recurring.interval, // Use the same interval as the current price
+            },
+        });
+
+        // Update the subscription with the new price
+        const updatedSubscription = await stripe.subscriptions.update(subscriptionId, {
+            items: [{
+                id: subscription.items.data[0].id,
+                price: createdPrice.id, // Link the new price to the subscription
+            }],
+        });
+        console.log('Price Updated newId:  ', createdPrice.id, ' - against subscriptionID: ', subscriptionId)
+        return updatedSubscription;
+    } catch (error) {
+        throw new Error('Error creating new price for subscription: ' + error.message);
+    }
+};
+
+
+export const getPriceByPaymentId = async (paymentId) => {
+    try {
+        const paymentIntent = await stripe.paymentIntents.retrieve(paymentId);
+        console.log('getPriceByPaymentId- paymentId: ', paymentId)
+        console.log('getPriceByPaymentId: ', paymentIntent.amount)
+        return paymentIntent.amount/100;
+    } catch (error) {
+        throw new Error('Error fetching price by payment ID: ' + error.message);
+    }
+};
+
+export const getPriceBySubscriptionId = async (subscriptionId) => {
+    try {
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const priceId = subscription.items.data[0].price.id; // Assuming only one item in subscription
+        const price = await stripe.prices.retrieve(priceId);
+        console.log('getPriceBySubscriptionId - subscriptionId: ', subscriptionId)
+        console.log('getPriceBySubscriptionId: ', price.unit_amount)
+        return price.unit_amount;
+    } catch (error) {
+        throw new Error('Error fetching price by subscription ID: ' + error.message);
+    }
+};
 

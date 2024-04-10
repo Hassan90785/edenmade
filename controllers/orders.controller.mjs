@@ -2,6 +2,7 @@
 
 import {ErrorResponse, successResponse, successResponseWithData} from "../helpers/apiresponse.mjs";
 import pool from "../db/dbConnection.mjs";
+import {getPriceByPaymentId, getPriceBySubscriptionId} from "./stripe.controller.mjs";
 
 /**
  * Place an order
@@ -34,6 +35,7 @@ export const placeOrder = async (req, res) => {
             customer_id,
             meals_per_week,
             number_of_people,
+            due_amount: amount_paid,
             delivery_date: new Date()
         });
         if (mapping) {
@@ -56,7 +58,14 @@ export const placeOrder = async (req, res) => {
  * @param number_of_people
  * @returns {Promise<boolean>}
  */
-export const generateMapping = async ({order_id, customer_id, meals_per_week, delivery_date, number_of_people}) => {
+export const generateMapping = async ({
+                                          order_id,
+                                          customer_id,
+                                          meals_per_week,
+                                          delivery_date,
+                                          number_of_people,
+                                          due_amount
+                                      }) => {
     try {
         // Fetch 3 random recipes from the recipes table
         const recipesQuery = `
@@ -66,7 +75,6 @@ export const generateMapping = async ({order_id, customer_id, meals_per_week, de
             LIMIT 3
         `;
         const [recipesResult] = await pool.query(recipesQuery);
-
         // Create mapping entries for 4 weeks
         for (let week = 1; week <= 4; week++) {
             // Calculate delivery date for each week
@@ -83,11 +91,11 @@ export const generateMapping = async ({order_id, customer_id, meals_per_week, de
                 // Insert mapping entry
                 const mappingQuery = `
                     INSERT INTO orderrecipemapping ( order_id, week, recipe_id, spice_level_id,
-                     recipe_price, delivery_date, meals_per_week, number_of_people)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     recipe_price, delivery_date, meals_per_week, number_of_people, due_amount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `;
                 await pool.query(mappingQuery, [order_id, week, recipe_id, 2, price,
-                    currentDeliveryDate, meals_per_week, number_of_people]);
+                    currentDeliveryDate, meals_per_week, number_of_people, due_amount]);
             }
         }
 
@@ -145,7 +153,8 @@ export const updateOrderRecipeMapping = async (order_id, subscription_id, paymen
         console.log('Subscription ID:', subscription_id);
         console.log('Payment ID:', payment_id);
         console.log('Payment Date:', payment_date);
-
+        const price = await getPriceByPaymentId(payment_id)
+        console.log('price:: ',price)
         // Check if subscription_id in orderdetails table is null, if so, update it with subscriptionId
         const updateSubscriptionIdQuery = `
             UPDATE orderdetails
@@ -170,15 +179,16 @@ export const updateOrderRecipeMapping = async (order_id, subscription_id, paymen
             const firstSetWeek = nullPaymentResult[0].week;
             console.log('week: ', firstSetWeek)
             const firstSetRows = nullPaymentResult.filter(row => row.week === firstSetWeek);
+            console.log('firstSetRows::: ', firstSetRows)
             for (const nullPaymentRow of firstSetRows) {
                 // Update payment_id and payment_date for each row
                 const updatePaymentInfoQuery = `
                     UPDATE orderrecipemapping
-                    SET payment_id = ?, payment_date = ?
+                    SET payment_id = ?, payment_date = ?, paid_amount = ?
                     WHERE mapping_id = ?
                 `;
                 const paymentResult = await pool.query(updatePaymentInfoQuery,
-                    [payment_id, payment_date, nullPaymentRow.mapping_id]);
+                    [payment_id, payment_date, price, nullPaymentRow.mapping_id]);
                 const paymentRowsChanged = paymentResult ? paymentResult.affectedRows : 0;
             }
 
@@ -313,9 +323,9 @@ export const getOrderDetails = async (orderId) => {
                 mergedOrderDetails.push(detail);
             }
         });
-
         // Update order details with merged items
         orderDetails.order_details = mergedOrderDetails;
+
 
         return orderDetails; // Return order details object
     } catch (error) {
