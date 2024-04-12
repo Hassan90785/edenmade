@@ -17,30 +17,22 @@ export const stripe_webhook = async (req, res) => {
             console.error('Error verifying webhook signature:', err);
             return res.status(400).send(`Webhook Error: ${err.message}`);
         }
+        console.log('****************--------------------WEBHOOK------------***************')
+
+        console.log('event.type: ', event.type)
+
 
         // Handle payment success event
-        if (event.type === 'checkout.session.completed') {
+        if (event.type === 'invoice.payment_succeeded') {
+            console.log('>>>>>>>invoice.paid', event.data)
             const session = event.data.object;
             const subscription_id = session.subscription;
-            const initial_payment_id = session.payment_intent;
-            const stripe_customer_id = session.customer;
+            const paymentId = session.payment_intent;
             const customer_email = session.customer_email;
-            const amount_paid = session.amount_total;
+            const amount_paid = session.amount_paid;
+            const paymentDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            const paymentNumber = await determinePaymentNumber(subscription_id, customer_email, paymentId, paymentDate); // Implement this function to fetch payment number from your database
 
-            if (subscription_id) {
-                console.log('Payment Success ')
-                const {paymentId, paymentDate} = await getSubscriptionPayments(subscription_id)
-                console.log('paymentId: ', paymentId)
-                console.log('paymentDate: ', paymentDate)
-                console.log('session: ', session)
-                // Determine payment number based on your records
-                const paymentNumber = await determinePaymentNumber(subscription_id, customer_email, paymentId, paymentDate); // Implement this function to fetch payment number from your database
-                console.log('OrderID: ', paymentNumber)
-
-            } else {
-                // Single payment (non-subscription)
-                // Handle accordingly
-            }
         }
 
         res.status(200).end();
@@ -109,6 +101,28 @@ export const create_subscription = async (req, res) => {
         res.status(500).send('Error creating subscription');
     }
 }
+
+export const trigger_manual_payment = async (req, res) => {
+    try {
+        console.log('*********trigger_manual_payment**********')
+        const subscriptionId = req.body.subscriptionId; // Assuming you receive the subscription ID in the request body
+
+        // Update the subscription to trigger immediate payment
+        const updatedSubscription = await stripe.subscriptions.update(subscriptionId, {
+            billing_cycle_anchor: 'now', // Trigger payment immediately
+        });
+        console.log('updatedSubscription: ', updatedSubscription)
+        // If you need to handle the updated subscription object, you can do so here
+        console.log('******END trigger_manual_payment******')
+        // Return success message to the client
+        res.json({message: 'Manual payment triggered successfully.'});
+    } catch (error) {
+        console.error('Error triggering manual payment:', error);
+        res.status(500).send('Error triggering manual payment');
+    }
+}
+
+
 const createNewPriceForSubscription = async (subscriptionId, newPrice) => {
     try {
         // Retrieve the existing subscription to get the current price ID
@@ -145,7 +159,7 @@ export const getPriceByPaymentId = async (paymentId) => {
         const paymentIntent = await stripe.paymentIntents.retrieve(paymentId);
         console.log('getPriceByPaymentId- paymentId: ', paymentId)
         console.log('getPriceByPaymentId: ', paymentIntent.amount)
-        return paymentIntent.amount/100;
+        return paymentIntent.amount / 100;
     } catch (error) {
         throw new Error('Error fetching price by payment ID: ' + error.message);
     }
