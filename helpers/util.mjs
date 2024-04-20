@@ -1,53 +1,55 @@
 import pool from "../db/dbConnection.mjs";
 
 /**
- * Get Paid Order
- * @param order_id
+ * Get Customer Id
  * @returns {Promise<*|null>}
+ * @param email
  */
-export const getLastPaidMapping = async (order_id) => {
+export const getCustomerId = async (email) => {
     try {
         const query = `
-            SELECT *
-            FROM orderrecipemapping
-            WHERE payment_id is not null and order_id=?
-            ORDER BY week DESC
+            SELECT customer_id
+            FROM customer
+            WHERE email = ?
             LIMIT 1
         `;
-        const [result] = await pool.query(query, [order_id]);
+        const [result] = await pool.query(query, [email]);
         if (result.length > 0) {
             return result[0];
         } else {
+            console.log('No Customer Found against Customer Email :', email);
             return null; // No order found
         }
     } catch (error) {
-        console.error('Error fetching Last Paid Mapping:', error);
+        console.error('Error fetching Customer ID against Customer Email:', error);
         throw error;
     }
 };
-/**
- * Get Due Order
- * @param order_id
- * @returns {Promise<*|null>}
- */
 
-export const getDueMapping = async (order_id) => {
+/**
+ * Get Order Id
+ * @returns {Promise<*|null>}
+ * @param customerId
+ */
+export const getOrderId = async (customerId) => {
     try {
+        const {customer_id} = customerId;
         const query = `
-            SELECT *
-            FROM orderrecipemapping
-            WHERE payment_id is  null and order_id=?
-            ORDER BY week ASC
+            SELECT order_id, active_week
+            FROM orderdetails
+            WHERE customer_id = ?
+            order by order_id desc
             LIMIT 1
         `;
-        const [result] = await pool.query(query, [order_id]);
+        const [result] = await pool.query(query, [customer_id]);
         if (result.length > 0) {
             return result[0];
         } else {
+            console.log('No Order Found against Customer ID:', customer_id);
             return null; // No order found
         }
     } catch (error) {
-        console.error('Error fetching Due Mapping:', error);
+        console.error('Error fetching Order ID against Customer Id:', error);
         throw error;
     }
 };
