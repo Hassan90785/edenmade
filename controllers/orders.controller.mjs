@@ -3,6 +3,7 @@
 import {ErrorResponse, successResponse, successResponseWithData} from "../helpers/apiresponse.mjs";
 import pool from "../db/dbConnection.mjs";
 import {getPriceByPaymentId, getPriceBySubscriptionId} from "./stripe.controller.mjs";
+import {sendEmail} from "./email.controller.mjs";
 
 /**
  * Place an order
@@ -340,7 +341,8 @@ export const getOrderDetailsEndpoint = async (req, res) => {
     try {
         console.log('getOrderDetailsEndpoint: ', req.body.orderId)
         const orderDetails = await getOrderDetails(req.body.orderId);
-        console.log('orderDetails: ', orderDetails)
+        await sendEmail('handlebars/newOrderTemplate.hbs', 'New Order Received', {orderID: '123', customerName: 'John Doe'});
+
         if (!orderDetails) {
             return ErrorResponse(res, 'Order not found', 404);
         }

@@ -2,10 +2,11 @@ import stripePackage from 'stripe';
 import {getOrderIdByCustomerEmail, updateOrderRecipeMapping} from "./orders.controller.mjs";
 import {getCustomerId, getOrderId} from "../helpers/util.mjs";
 import {updatePaymentSnacksMapping} from "./snacks.controller.mjs";
+import {config} from "../config/config.mjs";
 
-const stripe = stripePackage('sk_test_51Os7kqANqKE86m4zlzLkmfDMIl975fWda86rBMvOU88hMEZaBhEKqyQiNE8ypGbZWQ7Ol9kZpBXQg6SrcSu8R0qa000UkVVT0S');
+const stripe = stripePackage(config.stripe);
 // Endpoint to handle webhook events
-const webhookSecret = 'whsec_1CrL5xgrRkQfCz1qmhQ34zb8bzIlqIYb'; // Replace with your webhook secret
+const webhookSecret = config.stripe_webhook; // Replace with your webhook secret
 
 export const stripe_webhook = async (req, res) => {
     const eventPayload = req.body; // Assuming rawBody contains the raw request body
@@ -34,7 +35,7 @@ export const stripe_webhook = async (req, res) => {
                     const orderDetails = await getOrderId(customer_id);
                     console.log('---------')
                     console.log('-orderDetails:', orderDetails)
-                    if(orderDetails){
+                    if (orderDetails) {
                         await updatePaymentSnacksMapping({...orderDetails, amount_total, payment_intent})
                     }
                 }
@@ -52,7 +53,7 @@ export const stripe_webhook = async (req, res) => {
             const amount_paid = session.amount_paid;
             const paymentDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
             const paymentNumber = await determinePaymentNumber(subscription_id, customer_email, paymentId, paymentDate); // Implement this function to fetch payment number from your database
-
+            console.log('Email Sent!')
         }
 
         res.status(200).end();
