@@ -402,6 +402,19 @@ export const updateOrder = async (req, res) => {
         return ErrorResponse(res, 'Internal Server Error');
     }
 };
+const updateFirstWeekMapping = async (order, order_id) => {
+    console.log('updateFirstWeekMapping')
+    const {items, ...otherDetails} = order;
+    const existingMappingsQuery = `
+        SELECT *
+        FROM orderrecipemapping
+        WHERE order_id = ? AND week = ?
+    `;
+
+    for (const existingMapping of items) {
+        await updateMapping(existingMapping, otherDetails);
+    }
+}
 
 // Function to update mapping details for a given order
 const updateMappingDetails = async (order, order_id) => {

@@ -36,6 +36,50 @@ export const login = async (req, res) => {
     }
 };
 
+export const social_login = async (req, res) => {
+    const {email, indicator} = req.body;
+
+    try {
+        // Query the database to retrieve the user by username
+        const [rows] = await pool.query('SELECT * FROM customer WHERE email = ?', [email]);
+
+        // Check if user exists
+        if (rows.length === 0) {
+            let is_google = 0;
+            let is_facebook = 0;
+            let is_apple = 0;
+            if(indicator === 'G'){
+                is_google =1;
+            }
+            if(indicator === 'F'){
+                is_facebook =1;
+            }
+            if(indicator === 'A'){
+                is_apple =1;
+            }
+
+            const orderQuery = `
+            INSERT INTO customer (email, is_google, is_facebook,  is_apple)
+            VALUES (?, ?, ?, ?)
+        `;
+            const [customerResult] = await pool.query(orderQuery, [email, is_google, is_facebook, is_apple]);
+
+            const customer_id = customerResult.insertId;
+            const [rows] = await pool.query('SELECT * FROM customer WHERE customer_id = ?', [customer_id]);
+            return successResponseWithData(res, 'Login successful', rows[0]);
+        }
+
+        // Compare hashed passwords
+        const user = rows[0];
+
+        // Passwords match, authentication successful
+        return successResponseWithData(res, 'Login successful', user);
+    } catch (error) {
+        console.error('Error during login:', error);
+        return ErrorResponse(res, 'Internal Server Error');
+    }
+};
+
 
 /**
  * Sign up
