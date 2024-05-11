@@ -1,8 +1,9 @@
 import stripePackage from 'stripe';
-import {getOrderIdByCustomerEmail, updateOrderRecipeMapping} from "./orders.controller.mjs";
+import {getOrderIdByCustomerEmail, updateOrderRecipeMapping, updateSubscriptionStatus} from "./orders.controller.mjs";
 import {getCustomerId, getOrderId} from "../helpers/util.mjs";
 import {updatePaymentSnacksMapping} from "./snacks.controller.mjs";
 import {config} from "../config/config.mjs";
+import {successResponseWithData} from "../helpers/apiresponse.mjs";
 
 const stripe = stripePackage(config.stripe);
 // Endpoint to handle webhook events
@@ -192,37 +193,6 @@ export const trigger_manual_payment = async (req, res) => {
 }
 
 
-const createNewPriceForSubscription = async (subscriptionId, newPrice) => {
-    try {
-        // Retrieve the existing subscription to get the current price ID
-        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-        const currentPriceId = subscription.items.data[0].price.id;
-
-        // Create a new price with the desired amount
-        const createdPrice = await stripe.prices.create({
-            unit_amount: newPrice * 100, // Stripe expects the amount in cents
-            currency: 'usd', // Adjust currency as needed
-            product: subscription.items.data[0].price.product, // Use the same product as the current price
-            recurring: {
-                interval: subscription.items.data[0].price.recurring.interval, // Use the same interval as the current price
-            },
-        });
-
-        // Update the subscription with the new price
-        const updatedSubscription = await stripe.subscriptions.update(subscriptionId, {
-            items: [{
-                id: subscription.items.data[0].id,
-                price: createdPrice.id, // Link the new price to the subscription
-            }],
-        });
-        console.log('Price Updated newId:  ', createdPrice.id, ' - against subscriptionID: ', subscriptionId)
-        return updatedSubscription;
-    } catch (error) {
-        throw new Error('Error creating new price for subscription: ' + error.message);
-    }
-};
-
-
 export const getPriceByPaymentId = async (paymentId) => {
     try {
         const paymentIntent = await stripe.paymentIntents.retrieve(paymentId);
@@ -233,17 +203,44 @@ export const getPriceByPaymentId = async (paymentId) => {
         throw new Error('Error fetching price by payment ID: ' + error.message);
     }
 };
-
-export const getPriceBySubscriptionId = async (subscriptionId) => {
+// Function to pause a subscription
+export const pauseSubscription = async (req, res) => {
     try {
-        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-        const priceId = subscription.items.data[0].price.id; // Assuming only one item in subscription
-        const price = await stripe.prices.retrieve(priceId);
-        console.log('getPriceBySubscriptionId - subscriptionId: ', subscriptionId)
-        console.log('getPriceBySubscriptionId: ', price.unit_amount)
-        return price.unit_amount;
+        const subscription = await stripe.subscriptions.update(req.body.subscription_id, {
+            pause_collection: {behavior: 'void'} // Pauses collection immediately
+        });
+        await updateSubscriptionStatus('P', req.body.subscription_id)
+        return successResponseWithData(res, 'Subscription Paused successfully', subscription);
     } catch (error) {
-        throw new Error('Error fetching price by subscription ID: ' + error.message);
+        console.error('Error pausing subscription:', error);
+        throw error;
+    }
+};
+
+// Function to resume a paused subscription
+export const resumeSubscription = async (req, res) => {
+    try {
+        const subscription = await stripe.subscriptions.update(req.body.subscription_id, {
+            pause_collection: null // Resumes collection
+        });
+        await updateSubscriptionStatus('A', req.body.subscription_id)
+        return successResponseWithData(res, 'Subscription Resumed successfully', subscription);
+
+    } catch (error) {
+        console.error('Error resuming subscription:', error);
+        throw error;
+    }
+};
+
+// Function to cancel a subscription
+export const cancelSubscription = async (req, res) => {
+    try {
+        const canceledSubscription = await stripe.subscriptions.cancel(req.body.subscription_id);
+        await updateSubscriptionStatus('C', req.body.subscription_id)
+        return successResponseWithData(res, 'Subscription Cancelled successfully', canceledSubscription);
+    } catch (error) {
+        console.error('Error canceling subscription:', error);
+        throw error;
     }
 };
 

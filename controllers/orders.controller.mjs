@@ -2,8 +2,7 @@
 
 import {ErrorResponse, successResponse, successResponseWithData} from "../helpers/apiresponse.mjs";
 import pool from "../db/dbConnection.mjs";
-import {getPriceByPaymentId, getPriceBySubscriptionId} from "./stripe.controller.mjs";
-import {sendEmail} from "./email.controller.mjs";
+import {getPriceByPaymentId} from "./stripe.controller.mjs";
 
 /**
  * Place an order
@@ -20,15 +19,16 @@ export const placeOrder = async (req, res) => {
             order_type,
             amount_paid,
             meals_per_week,
+            selected_recipes,
             number_of_people
         } = req.body;
 
         // Create the order
         const orderQuery = `
-            INSERT INTO orderdetails (customer_id, order_type, active_week,  amount_paid)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO orderdetails (customer_id, order_type, active_week,  amount_paid,  selected_recipes)
+            VALUES (?, ?, ?, ?, ?)
         `;
-        const [orderResult] = await pool.query(orderQuery, [customer_id, order_type, active_week, amount_paid]);
+        const [orderResult] = await pool.query(orderQuery, [customer_id, order_type, active_week, amount_paid, selected_recipes]);
 
         const order_id = orderResult.insertId;
         const mapping = await generateMapping({
@@ -49,6 +49,65 @@ export const placeOrder = async (req, res) => {
         return ErrorResponse(res, 'Internal Server Error');
     }
 };
+
+/**
+ * Get Plan Setting
+ * @param req
+ * @param res
+ * @returns {Promise<*>}
+ */
+export const getPlanSetting = async (req, res) => {
+    try {
+        // Extract order details from the request body
+        const {
+            customer_id,
+        } = req.body;
+
+        // Create the order query
+        const orderQuery = `
+            SELECT od.order_id,
+                   od.active_week,
+                   od.selected_recipes,
+                   od.subscription_id,
+                   od.customer_id,
+                   od.subscription_status,
+                   orm.week,
+                   orm.meals_per_week,
+                   orm.number_of_people,
+                   orm.delivery_date,
+                   orm.due_amount,
+                   orm.payment_date
+            FROM orderdetails od
+            JOIN orderrecipemapping orm ON od.order_id = orm.order_id
+            WHERE od.customer_id = ? AND od.active_week = orm.week
+            LIMIT 1
+        `;
+
+        // Execute the order query
+        const [orderResult] = await pool.query(orderQuery, [customer_id]);
+        const result = orderResult[0];
+        console.log('result: ',result)
+        // Check if selected_recipes exists before splitting
+        if (result.selected_recipes) {
+            // Split selected_recipes IDs and fetch category names for each ID
+            const selectedRecipeIds = result.selected_recipes.split(',');
+            const categoryNames = await Promise.all(selectedRecipeIds.map(async (recipeId) => {
+                const categoryQuery = 'SELECT category_name FROM categories WHERE category_id = ?';
+                const [[category]] = await pool.query(categoryQuery, [recipeId]);
+                return category ? category.category_name : null;
+            }));
+
+            // Replace selected_recipes with category names
+            result.selected_recipes = categoryNames.filter(Boolean).join(', '); // Join category names and filter out null values
+        }
+
+        return successResponseWithData(res, 'Plan Retrieved successfully', result);
+    } catch (error) {
+        console.error('Error retrieving plan details:', error);
+        return ErrorResponse(res, 'Internal Server Error');
+    }
+};
+
 
 /**
  *  Generate Mapping
@@ -155,7 +214,7 @@ export const updateOrderRecipeMapping = async (order_id, subscription_id, paymen
         console.log('Payment ID:', payment_id);
         console.log('Payment Date:', payment_date);
         const price = await getPriceByPaymentId(payment_id)
-        console.log('price:: ',price)
+        console.log('price:: ', price)
         // Check if subscription_id in orderdetails table is null, if so, update it with subscriptionId
         const updateSubscriptionIdQuery = `
             UPDATE orderdetails
@@ -251,8 +310,10 @@ export const getOrderDetails = async (orderId) => {
                 od.customer_id,
                 od.active_week,
                 od.amount_paid,
+                od.subscription_status,
                 od.subscription_id AS stripe_customer_id,
                 od.initial_payment_id,
+                od.selected_recipes,
                 od.created_at,
                 c.email AS customer_email,
                 c.first_name AS customer_name,
@@ -289,7 +350,9 @@ export const getOrderDetails = async (orderId) => {
             customer_id: rows[0].customer_id,
             active_week: rows[0].active_week,
             amount_paid: rows[0].amount_paid,
+            selected_recipes: rows[0].selected_recipes,
             subscription_id: rows[0].stripe_customer_id,
+            subscription_status: rows[0].subscription_status,
             initial_payment_id: rows[0].initial_payment_id,
             created_at: rows[0].created_at,
             customer_email: rows[0].customer_email,
@@ -336,12 +399,131 @@ export const getOrderDetails = async (orderId) => {
 };
 
 
+// Endpoint to get active order details
+export const getActiveOrderDetails = async (req, res) => {
+    const customer_id = req.query.customer_id;
+    console.log('query: ', req.query.customer_id)
+    console.log('params: ', req.params.customer_id)
+    console.log('body: ', req.body.customer_id)
+    try {
+        // Query the database to retrieve the first active order for the customer
+        const firstActiveOrderQuery = `
+            SELECT order_id
+            FROM orderdetails
+            WHERE customer_id = ? AND active_week = 1
+            ORDER BY created_at ASC
+            LIMIT 1
+        `;
+        const [orderRows] = await pool.query(firstActiveOrderQuery, [customer_id]);
+        if (orderRows.length === 0) {
+            return res.status(404).json({message: 'Active order not found for this customer'});
+        }
+
+        const orderId = orderRows[0].order_id;
+
+        // Query the database to retrieve active order details by order ID
+        const orderQuery = `
+    SELECT
+        od.order_id,
+        od.customer_id,
+        od.active_week,
+        od.amount_paid,
+        od.selected_recipes,
+        od.subscription_status,
+        od.subscription_id AS stripe_customer_id,
+        od.initial_payment_id,
+        od.created_at,
+        c.email AS customer_email,
+        c.first_name AS customer_name,
+        m.week,
+        m.payment_id,
+        m.payment_date,
+        r.recipe_id,
+        r.title AS recipe_name,
+        r.price AS recipe_price,
+        s.spice_level_id,
+        s.spice_level_name,
+        m.delivery_date,
+        m.number_of_people,
+        m.meals_per_week,
+        m.mapping_id
+    FROM orderdetails od
+    JOIN customer c ON od.customer_id = c.customer_id
+    LEFT JOIN orderrecipemapping m ON od.order_id = m.order_id
+    LEFT JOIN recipes r ON m.recipe_id = r.recipe_id
+    LEFT JOIN spicelevels s ON m.spice_level_id = s.spice_level_id
+    WHERE od.order_id = ? AND m.week = od.active_week
+`;
+
+        const [rows] = await pool.query(orderQuery, [orderId]);
+        if (rows.length === 0) {
+            return ErrorResponse(res, 'Active order details  not found', 404);
+        }
+
+        // Construct the active order details object
+        const activeOrderDetails = {
+            order_id: rows[0].order_id,
+            customer_id: rows[0].customer_id,
+            active_week: rows[0].active_week,
+            selected_recipes: rows[0].selected_recipes,
+            amount_paid: rows[0].amount_paid,
+            subscription_id: rows[0].stripe_customer_id,
+            subscription_status: rows[0].subscription_status,
+            initial_payment_id: rows[0].initial_payment_id,
+            created_at: rows[0].created_at,
+            customer_email: rows[0].customer_email,
+            customer_name: rows[0].customer_name,
+            activeWeekOrderDetails: {
+                week: rows[0].week,
+                payment_id: rows[0].payment_id,
+                payment_date: rows[0].payment_date,
+                delivery_date: rows[0].delivery_date,
+                number_of_people: rows[0].number_of_people,
+                meals_per_week: rows[0].meals_per_week,
+                items: rows.map(row => ({
+                    mapping_id: row.mapping_id,
+                    recipe_id: row.recipe_id,
+                    recipe_name: row.recipe_name,
+                    recipe_price: parseFloat(row.recipe_price), // Convert to float
+                    spice_level_id: row.spice_level_id,
+                    spice_level_name: row.spice_level_name
+                }))
+            }
+        };
+
+        return successResponseWithData(res, 'Active order details retrieved successfully', activeOrderDetails);
+    } catch (error) {
+        console.error('Error retrieving active order details:', error);
+        return ErrorResponse(res, 'Internal Server Error');
+    }
+};
+
 // Endpoint handler to get order details by order ID
 export const getOrderDetailsEndpoint = async (req, res) => {
     try {
-        console.log('getOrderDetailsEndpoint: ', req.body.orderId)
-        const orderDetails = await getOrderDetails(req.body.orderId);
-        await sendEmail('handlebars/newOrderTemplate.hbs', 'New Order Received', {orderID: '123', customerName: 'John Doe'});
+        console.log('getOrderDetailsEndpoint: ', req.body.orderId);
+        const customer_id = req.body.customer_id;
+        const orderQuery = `
+         SELECT order_id
+          FROM orderdetails
+         WHERE customer_id = ?
+         ORDER BY 1 DESC
+         LIMIT 1`;
+        console.log('customer_id:: ', customer_id)
+        const [rows] = await pool.query(orderQuery, [customer_id]);
+        let orderDetails = null;
+        if (rows.length > 0) {
+            const order_id = rows[0].order_id;
+            console.log('order_id:::::::', order_id)
+            orderDetails = await getOrderDetails(order_id);
+        } else {
+            console.log('No Order Found against this customer: ', customer_id)
+        }
+        //
+        // await sendEmail('handlebars/newOrderTemplate.hbs', 'New Order Received', {
+        //     orderID: '123',
+        //     customerName: 'John Doe'
+        // });
 
         if (!orderDetails) {
             return ErrorResponse(res, 'Order not found', 404);
@@ -497,6 +679,17 @@ const deleteMapping = async (mapping_id) => {
     await pool.query(deleteMappingQuery, [mapping_id]);
 
     console.log(`Mapping removed from orderrecipemapping for mapping ID: ${mapping_id}`);
+};
+
+// Function to delete a mapping
+export const updateSubscriptionStatus = async (status, subscription_id) => {
+    console.log('updateSubscriptionStatus.')
+    const updateSubscriptionStatusQuery = `
+        UPDATE orderdetails SET subscription_status = ? WHERE subscription_id = ?
+    `;
+    await pool.query(updateSubscriptionStatusQuery, [status, subscription_id]);
+
+    console.log(`Updated Subscription Status for Subscription ID: ${subscription_id}`);
 };
 
 // Define your function here
